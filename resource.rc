@@ -1,0 +1,63 @@
+#include "resource.h"
+#include <windows.h>
+
+// 应用图标（确保同目录有 app.ico；如果没有请先放置）
+IDI_APPICON ICON "app.ico"
+
+// 启用 comctl v6 主题（现代 Windows 外观）
+1 RT_MANIFEST
+BEGIN
+    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+    "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
+    "  <assemblyIdentity version=\"1.0.0.0\" processorArchitecture=\"*\" name=\"HotkeyTool\" type=\"win32\"/>"
+    "  <dependency>"
+    "    <dependentAssembly>"
+    "      <assemblyIdentity type=\"win32\" name=\"Microsoft.Windows.Common-Controls\" version=\"6.0.0.0\" processorArchitecture=\"*\" publicKeyToken=\"6595b64144ccf1df\" language=\"*\"/>"
+    "    </dependentAssembly>"
+    "  </dependency>"
+    "</assembly>"
+END
+
+// 对话框：仅放布局与控件，占位文本为空；中文由代码设置
+IDD_MAIN DIALOGEX 0, 0, 370, 120
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Hotkey Macro"
+FONT 9, "Microsoft YaHei"
+BEGIN
+    // 连跳
+    LTEXT       "", IDC_STATIC_BHOP_LABEL,        8,   11,  60, 10
+    EDITTEXT    IDC_EDIT_BHOP,                    72,  8,  88, 14, ES_READONLY | WS_TABSTOP
+    LTEXT       "", IDC_STATIC_BHOP_DELAY_LABEL,  168, 11,  60, 10
+    EDITTEXT    IDC_EDIT_BHOP_DELAY,              210, 8,  30, 14, ES_NUMBER | WS_TABSTOP
+
+    // 双蹲
+    LTEXT       "", IDC_STATIC_CROUCH_LABEL,      8,   31, 60, 10
+    EDITTEXT    IDC_EDIT_CROUCH,                  72,  28, 88, 14, ES_READONLY | WS_TABSTOP
+    LTEXT       "", IDC_STATIC_CROUCH_DOWN_LABEL, 168, 31, 60, 10
+    EDITTEXT    IDC_EDIT_CROUCH_DOWN,             210, 28, 30, 14, ES_NUMBER | WS_TABSTOP
+    LTEXT       "", IDC_STATIC_CROUCH_UP_LABEL,   250, 31, 60, 10
+    EDITTEXT    IDC_EDIT_CROUCH_UP,               290, 28, 30, 14, ES_NUMBER | WS_TABSTOP
+
+    // 空速脚本
+    LTEXT       "", IDC_STATIC_HASTEN_LABEL,      8,   51, 80, 10
+    EDITTEXT    IDC_EDIT_HASTEN,                  72,  48, 88, 14, ES_READONLY | WS_TABSTOP
+    LTEXT       "", IDC_STATIC_HASTEN_AMP_LABEL,  168, 51, 32, 10
+    EDITTEXT    IDC_EDIT_HASTEN_AMP,              200, 48, 30, 14, ES_NUMBER | WS_TABSTOP
+    LTEXT       "", IDC_STATIC_HASTEN_DELAY_LABEL,240, 51, 60, 10
+    EDITTEXT    IDC_EDIT_HASTEN_DELAY,            280, 48, 30, 14, ES_NUMBER | WS_TABSTOP
+
+    // 自动空速
+    LTEXT       "", IDC_STATIC_AUTOAS_LABEL,      8,   71, 80, 10
+    EDITTEXT    IDC_EDIT_AUTOAS,                  72,  68, 88, 14, ES_READONLY | WS_TABSTOP
+
+    // 锁帧
+    LTEXT       "", IDC_STATIC_FPS_LABEL,         168, 71, 30, 10
+    EDITTEXT    IDC_EDIT_FPS,                     200, 68, 30, 14, ES_NUMBER | WS_TABSTOP
+    PUSHBUTTON  "", IDC_BTN_FPS,                  240, 68, 40, 14, WS_TABSTOP
+
+    // 应用按钮（默认按钮）
+    DEFPUSHBUTTON  "", IDC_BTN_APPLY,             295, 68, 50, 14, WS_TABSTOP
+
+    // 状态栏
+    LTEXT       "", IDC_STATIC_STATUS,            8,   95, 350, 12
+END
