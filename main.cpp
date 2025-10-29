@@ -1,8 +1,3 @@
-// Ô´Âë±£´æÎª CP936£¨ANSI ¼òÌåÖĞÎÄ£©¡£
-// ±àÒë£º
-// windres resource.rc -O coff --codepage=936 -o resource.res
-// g++ main.cpp resource.res -municode -mwindows -o "ÉúËÀ¾Ñ»÷Á¬Ìøºê.exe" -luser32 -lgdi32 -lcomctl32 -lwinmm -lshell32 -ladvapi32 -finput-charset=CP936 -fexec-charset=CP936
-
 #include <windows.h>
 #include <mmsystem.h>
 #include <commctrl.h>
@@ -17,34 +12,41 @@
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "shell32.lib")
 
-// È«¾Ö
+#ifndef VK_XBUTTON1
+#define VK_XBUTTON1 0x05
+#endif
+#ifndef VK_XBUTTON2
+#define VK_XBUTTON2 0x06
+#endif
+
+// å…¨å±€
 HINSTANCE g_hInst;
 HWND g_hWnd;
 volatile BOOL running = TRUE;
 
-// ÈÈ¼üÄ¬ÈÏ
-volatile UINT vkBhop   = VK_F6; // Á¬Ìø
-volatile UINT vkCrouch = VK_F7; // Ë«¶×
-volatile UINT vkHasten = VK_F8; // ¿ÕËÙ½Å±¾
-volatile UINT vkAutoAS = VK_F9; // ×Ô¶¯¿ÕËÙ
+// çƒ­é”®é»˜è®¤
+volatile UINT vkBhop   = VK_F6; // è¿è·³
+volatile UINT vkCrouch = VK_F7; // åŒè¹²
+volatile UINT vkHasten = VK_F8; // ç©ºé€Ÿè„šæœ¬
+volatile UINT vkAutoAS = VK_F9; // è‡ªåŠ¨ç©ºé€Ÿ
 
-// ²¶»ñÄ£Ê½×´Ì¬£¨µÈ´ıÓÃ»§ÊäÈë£©
+// æ•è·æ¨¡å¼çŠ¶æ€ï¼ˆç­‰å¾…ç”¨æˆ·è¾“å…¥ï¼‰
 volatile BOOL capBhop   = FALSE;
 volatile BOOL capCrouch = FALSE;
 volatile BOOL capHasten = FALSE;
 volatile BOOL capAutoAS = FALSE;
 
-// ×´Ì¬
+// çŠ¶æ€
 volatile BOOL bhopActive = FALSE;
 volatile BOOL crouchHeld = FALSE;
 volatile BOOL hastenHeld = FALSE;
 volatile BOOL autoASHeld = FALSE;
 
-// ÊÂ¼şÓë¹³×Ó
+// äº‹ä»¶ä¸é’©å­
 HANDLE evtBhopStart, evtCrouchStart, evtHastenStart, evtAutoASStart;
 HHOOK hKbdHook, hMouseHook;
 
-// ²ÎÊı
+// å‚æ•°
 int   bhopDelay       = 3;
 int   crouchDown      = 29;
 int   crouchUp        = 4;
@@ -52,7 +54,7 @@ int   hastenAmplitude = 150;
 int   hastenDelay     = 4;
 DWORD fpsLast         = 120;
 
-// ×Ô¶¯¿ÕËÙÏà¹Ø
+// è‡ªåŠ¨ç©ºé€Ÿç›¸å…³
 DWORD lastMoveTime  = 0;
 BOOL  keyDownA      = FALSE;
 BOOL  keyDownD      = FALSE;
@@ -61,15 +63,26 @@ BOOL  wheelGate     = FALSE;
 const DWORD WHEEL_GATE_WINDOW_MS = 200;
 const DWORD STOP_THRESHOLD_MS     = 10;
 
-// ÅäÖÃÎÄ¼şÂ·¾¶
+// é…ç½®æ–‡ä»¶è·¯å¾„
 wchar_t g_configPath[MAX_PATH] = L"";
 
-// Ç°ÖÃÉùÃ÷
+// --------------- æ–°å¢ï¼šè‡ªåŠ¨ç©ºé€Ÿé•¿æŒ‰/ç‚¹æŒ‰é€»è¾‘æ‰€éœ€å˜é‡ ---------------
+volatile DWORD autoASKeyDownTime = 0;
+const DWORD AUTOAS_LONGPRESS_MS = 300; // è¶…è¿‡è¯¥æ—¶é•¿ç®—é•¿æŒ‰
+volatile BOOL autoASLongPressMode = FALSE;
+volatile BOOL autoASPrevState = FALSE; // è®°å½•æŒ‰ä¸‹å‰çš„çŠ¶æ€ï¼Œç”¨äºç‚¹æŒ‰åˆ‡æ¢
+
+// --------------- æ–°å¢ï¼šç»Ÿä¸€å¤„ç†é¼ æ ‡ä¾§é”®ä½œä¸ºçƒ­é”®è§¦å‘æ‰€éœ€ ---------------
+volatile BOOL autoASMouseHeld = FALSE;
+volatile DWORD autoASMouseDownTime = 0;
+volatile BOOL autoASMousePrevState = FALSE; // é¼ æ ‡ä¾§é”®æŒ‰ä¸‹å‰çš„çŠ¶æ€
+
+// å‰ç½®å£°æ˜
 INT_PTR CALLBACK DlgProc(HWND, UINT, WPARAM, LPARAM);
 LRESULT CALLBACK LowLevelKbdProc(int, WPARAM, LPARAM);
 LRESULT CALLBACK LowLevelMouseProc(int, WPARAM, LPARAM);
 
-// ¹¤¾ßº¯Êı
+// å·¥å…·å‡½æ•°
 void UpdateStatus(const wchar_t* text) {
     if (g_hWnd) SetDlgItemTextW(g_hWnd, IDC_STATIC_STATUS, text);
 }
@@ -114,8 +127,12 @@ void PressReleaseKey(WORD vk, int delay) {
     SendInput(1, &in[1], sizeof(INPUT));
 }
 
-// ¼üÃû
+// é”®å
 void VkName(UINT vk, wchar_t* buf, size_t cch) {
+    // æ–°å¢ï¼šå¤„ç†é¼ æ ‡ä¾§é”®å‘½å
+    if (vk == VK_XBUTTON1) { wcsncpy_s(buf, cch, L"é¼ æ ‡ä¾§é”®1", _TRUNCATE); return; }
+    if (vk == VK_XBUTTON2) { wcsncpy_s(buf, cch, L"é¼ æ ‡ä¾§é”®2", _TRUNCATE); return; }
+
     UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC) << 16;
     if (vk == VK_LEFT || vk == VK_RIGHT || vk == VK_UP || vk == VK_DOWN) scan |= 0x01000000;
     if (GetKeyNameTextW((LONG)scan, buf, (int)cch) <= 0) wsprintfW(buf, L"VK 0x%02X", vk);
@@ -139,7 +156,7 @@ void RegisterRawInput(HWND hWnd) {
     RegisterRawInputDevices(&rid, 1, sizeof(rid));
 }
 
-// ÅäÖÃÂ·¾¶
+// é…ç½®è·¯å¾„
 void InitConfigPath() {
     wchar_t docPath[MAX_PATH] = L"";
     if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PERSONAL, NULL, SHGFP_TYPE_CURRENT, docPath))) {
@@ -179,25 +196,25 @@ void LoadConfig() {
     hastenDelay     = GetPrivateProfileIntW(L"Params", L"HastenDelay",     4,   g_configPath);
 }
 
-// ×¢²á±í FPS
+// æ³¨å†Œè¡¨ FPS
 DWORD ReadCurrentFPSFromRegistry() {
     HKEY hKey;
     DWORD fps = 120, type = REG_DWORD, size = sizeof(DWORD);
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Wooduan\\ÉúËÀ¾Ñ»÷Î¢¶ËÕ½¶·", 0, KEY_QUERY_VALUE, &hKey) == ERROR_SUCCESS) {
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Wooduan\\ç”Ÿæ­»ç‹™å‡»å¾®ç«¯æˆ˜æ–—", 0, KEY_QUERY_VALUE, &hKey) == ERROR_SUCCESS) {
         RegQueryValueExW(hKey, L"FrameLimit_h731164557", NULL, &type, (LPBYTE)&fps, &size);
         RegCloseKey(hKey);
     }
     return fps;
 }
 
-// Ïß³Ì
+// çº¿ç¨‹
 DWORD WINAPI ThreadBhop(LPVOID) {
     timeBeginPeriod(1);
     while (running) {
         if (WaitForSingleObject(evtBhopStart, INFINITE) == WAIT_OBJECT_0) {
-            UpdateStatus(L"Á¬ÌøÔËĞĞÖĞ...");
+            UpdateStatus(L"è¿è·³è¿è¡Œä¸­...");
             while (bhopActive && running) { SendWheelDown(); Sleep(bhopDelay); }
-            UpdateStatus(L"Á¬ÌøÒÑÍ£Ö¹");
+            UpdateStatus(L"è¿è·³å·²åœæ­¢");
         }
     }
     timeEndPeriod(1);
@@ -207,9 +224,9 @@ DWORD WINAPI ThreadCrouch(LPVOID) {
     timeBeginPeriod(1);
     while (running) {
         if (WaitForSingleObject(evtCrouchStart, INFINITE) == WAIT_OBJECT_0) {
-            UpdateStatus(L"Ë«¶×ÔËĞĞÖĞ...");
+            UpdateStatus(L"åŒè¹²è¿è¡Œä¸­...");
             while (crouchHeld && running) { SendShift(TRUE); Sleep(crouchDown); SendShift(FALSE); Sleep(crouchUp); }
-            UpdateStatus(L"Ë«¶×ÒÑÍ£Ö¹");
+            UpdateStatus(L"åŒè¹²å·²åœæ­¢");
         }
     }
     timeEndPeriod(1);
@@ -219,14 +236,14 @@ DWORD WINAPI ThreadHasten(LPVOID) {
     timeBeginPeriod(1);
     while (running) {
         if (WaitForSingleObject(evtHastenStart, INFINITE) == WAIT_OBJECT_0) {
-            UpdateStatus(L"¿ÕËÙ½Å±¾ÔËĞĞÖĞ...");
+            UpdateStatus(L"ç©ºé€Ÿè„šæœ¬è¿è¡Œä¸­...");
             while (hastenHeld && running) {
                 MoveMouseRelative(hastenAmplitude, 0);
                 PressReleaseKey('A', hastenDelay);
                 MoveMouseRelative(-hastenAmplitude, 0);
                 PressReleaseKey('D', hastenDelay);
             }
-            UpdateStatus(L"¿ÕËÙ½Å±¾ÒÑÍ£Ö¹");
+            UpdateStatus(L"ç©ºé€Ÿè„šæœ¬å·²åœæ­¢");
         }
     }
     timeEndPeriod(1);
@@ -236,7 +253,7 @@ DWORD WINAPI ThreadAutoAS(LPVOID) {
     timeBeginPeriod(1);
     while (running) {
         if (WaitForSingleObject(evtAutoASStart, INFINITE) == WAIT_OBJECT_0) {
-            UpdateStatus(L"×Ô¶¯¿ÕËÙÔËĞĞÖĞ...");
+            UpdateStatus(L"è‡ªåŠ¨ç©ºé€Ÿè¿è¡Œä¸­...");
             while (autoASHeld && running) {
                 DWORD now = GetTickCount();
                 wheelGate = (now - lastWheelTime <= WHEEL_GATE_WINDOW_MS);
@@ -248,34 +265,137 @@ DWORD WINAPI ThreadAutoAS(LPVOID) {
             }
             if (keyDownA) { PressKey('A', FALSE); keyDownA = FALSE; }
             if (keyDownD) { PressKey('D', FALSE); keyDownD = FALSE; }
-            UpdateStatus(L"×Ô¶¯¿ÕËÙÒÑÍ£Ö¹");
+            UpdateStatus(L"è‡ªåŠ¨ç©ºé€Ÿå·²åœæ­¢");
         }
     }
     timeEndPeriod(1);
     return 0;
 }
 
-// ¹³×Ó
+// é’©å­
 LRESULT CALLBACK LowLevelKbdProc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode == HC_ACTION) {
         KBDLLHOOKSTRUCT* p = (KBDLLHOOKSTRUCT*)lParam;
         UINT vk = p->vkCode;
         if (wParam == WM_KEYDOWN) {
-            if (capBhop)   { vkBhop   = vk; capBhop   = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"Á¬ÌøÈÈ¼üÒÑÉèÖÃ"); return 1; }
-            if (capCrouch) { vkCrouch = vk; capCrouch = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"Ë«¶×ÈÈ¼üÒÑÉèÖÃ"); return 1; }
-            if (capHasten) { vkHasten = vk; capHasten = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"¿ÕËÙ½Å±¾ÈÈ¼üÒÑÉèÖÃ"); return 1; }
-            if (capAutoAS) { vkAutoAS = vk; capAutoAS = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"×Ô¶¯¿ÕËÙÈÈ¼üÒÑÉèÖÃ"); return 1; }
+            if (capBhop)   { vkBhop   = vk; capBhop   = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"è¿è·³çƒ­é”®å·²è®¾ç½®"); return 1; }
+            if (capCrouch) { vkCrouch = vk; capCrouch = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"åŒè¹²çƒ­é”®å·²è®¾ç½®"); return 1; }
+            if (capHasten) { vkHasten = vk; capHasten = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"ç©ºé€Ÿè„šæœ¬çƒ­é”®å·²è®¾ç½®"); return 1; }
+            if (capAutoAS) { vkAutoAS = vk; capAutoAS = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"è‡ªåŠ¨ç©ºé€Ÿçƒ­é”®å·²è®¾ç½®"); return 1; }
         }
         if (vk == vkBhop && wParam == WM_KEYDOWN) { bhopActive = !bhopActive; if (bhopActive) SetEvent(evtBhopStart); }
-        if (vk == vkCrouch) { if (wParam == WM_KEYDOWN && !crouchHeld) { crouchHeld = TRUE; SetEvent(evtCrouchStart); } else if (wParam == WM_KEYUP) { crouchHeld = FALSE; } }
-        if (vk == vkHasten) { if (wParam == WM_KEYDOWN && !hastenHeld) { hastenHeld = TRUE; SetEvent(evtHastenStart); } else if (wParam == WM_KEYUP) { hastenHeld = FALSE; } }
-        if (vk == vkAutoAS) { if (wParam == WM_KEYDOWN && !autoASHeld) { autoASHeld = TRUE; SetEvent(evtAutoASStart); } else if (wParam == WM_KEYUP) { autoASHeld = FALSE; } }
+
+        if (vk == vkCrouch) {
+            if (wParam == WM_KEYDOWN && !crouchHeld) { crouchHeld = TRUE; SetEvent(evtCrouchStart); }
+            else if (wParam == WM_KEYUP) { crouchHeld = FALSE; }
+        }
+        if (vk == vkHasten) {
+            if (wParam == WM_KEYDOWN && !hastenHeld) { hastenHeld = TRUE; SetEvent(evtHastenStart); }
+            else if (wParam == WM_KEYUP) { hastenHeld = FALSE; }
+        }
+
+        // --------------- è‡ªåŠ¨ç©ºé€Ÿæ”¯æŒç‚¹æŒ‰åˆ‡æ¢ + é•¿æŒ‰æŒç»­ï¼ˆä¿®å¤ï¼šç‚¹æŒ‰åˆ‡æ¢åŸºäºæŒ‰ä¸‹å‰çŠ¶æ€ï¼‰ ---------------
+        if (vk == vkAutoAS) {
+            if (wParam == WM_KEYDOWN) {
+                if (autoASKeyDownTime == 0) autoASKeyDownTime = GetTickCount();
+                autoASPrevState = autoASHeld; // è®°å½•æŒ‰ä¸‹å‰çš„çŠ¶æ€
+                // ä¸ºäº†é•¿æŒ‰æœŸé—´ç«‹å³ç”Ÿæ•ˆï¼Œè¿™é‡Œä¸´æ—¶å¯åŠ¨ï¼ˆä¸å½±å“ç‚¹æŒ‰åˆ‡æ¢ï¼Œå› ä¸ºç‚¹æŒ‰æ—¶ç”¨ prevState è®¡ç®—ï¼‰
+                if (!autoASHeld) {
+                    autoASHeld = TRUE;
+                    autoASLongPressMode = TRUE; // å…ˆè§†ä¸ºé•¿æŒ‰æ¨¡å¼ï¼ˆæŒ‰ä½æœŸé—´ä¿æŒï¼‰
+                    SetEvent(evtAutoASStart);
+                } else {
+                    // å·²ç»æ˜¯å¼€å¯çŠ¶æ€ï¼Œä¿æŒ
+                    autoASLongPressMode = TRUE;
+                }
+            } else if (wParam == WM_KEYUP) {
+                DWORD held = GetTickCount() - autoASKeyDownTime;
+                autoASKeyDownTime = 0;
+                if (held < AUTOAS_LONGPRESS_MS) {
+                    // ç‚¹æŒ‰ï¼šåˆ‡æ¢åˆ°â€œæŒ‰ä¸‹å‰çŠ¶æ€â€çš„ç›¸åå€¼
+                    BOOL newState = !autoASPrevState;
+                    // å¦‚æœå½“å‰ä¸´æ—¶ä¸º TRUE è€Œ newState ä¸º FALSEï¼Œä¼šç›´æ¥å…³é—­ï¼›åä¹‹åˆ™ä¿æŒå¼€å¯å¹¶ç¡®ä¿çº¿ç¨‹å¯åŠ¨
+                    autoASHeld = newState;
+                    if (autoASHeld && !autoASPrevState) {
+                        // OFF -> ON çš„ç‚¹æŒ‰ï¼Œç¡®ä¿å¯åŠ¨çº¿ç¨‹
+                        SetEvent(evtAutoASStart);
+                    }
+                } else {
+                    // é•¿æŒ‰ï¼šæ¾å¼€å³åœæ­¢
+                    autoASHeld = FALSE;
+                }
+                autoASLongPressMode = FALSE;
+            }
+        }
     }
     return CallNextHookEx(hKbdHook, nCode, wParam, lParam);
 }
 LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode == HC_ACTION) {
         MSLLHOOKSTRUCT* p = (MSLLHOOKSTRUCT*)lParam;
+
+        // --------------- é¼ æ ‡ä¾§é”®ä½œä¸ºçƒ­é”®çš„å½•å…¥ä¸è§¦å‘ï¼ˆä¸é”®ç›˜ä¸€è‡´é€»è¾‘ï¼‰ ---------------
+        if (wParam == WM_XBUTTONDOWN || wParam == WM_XBUTTONUP) {
+            UINT btn = HIWORD(p->mouseData); // XBUTTON1=1, XBUTTON2=2
+            UINT vk = (btn == XBUTTON1) ? VK_XBUTTON1 : VK_XBUTTON2;
+
+            // æ•è·æ¨¡å¼ï¼šå…è®¸ä¾§é”®è¢«è®¾ç½®ä¸ºçƒ­é”®
+            if (wParam == WM_XBUTTONDOWN) {
+                if (capBhop)   { vkBhop   = vk; capBhop   = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"è¿è·³çƒ­é”®å·²è®¾ç½®"); return 1; }
+                if (capCrouch) { vkCrouch = vk; capCrouch = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"åŒè¹²çƒ­é”®å·²è®¾ç½®"); return 1; }
+                if (capHasten) { vkHasten = vk; capHasten = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"ç©ºé€Ÿè„šæœ¬çƒ­é”®å·²è®¾ç½®"); return 1; }
+                if (capAutoAS) { vkAutoAS = vk; capAutoAS = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"è‡ªåŠ¨ç©ºé€Ÿçƒ­é”®å·²è®¾ç½®"); return 1; }
+            }
+
+            // è§¦å‘é€»è¾‘ï¼šå½“ä¾§é”®è¢«è®¾ç½®ä¸ºæŸçƒ­é”®æ—¶ï¼Œæ‰§è¡Œä¸é”®ç›˜ä¸€è‡´çš„è¡Œä¸º
+            if (vk == vkBhop && wParam == WM_XBUTTONDOWN) {
+                bhopActive = !bhopActive; if (bhopActive) SetEvent(evtBhopStart);
+                return CallNextHookEx(hMouseHook, nCode, wParam, lParam);
+            }
+            if (vk == vkCrouch) {
+                if (wParam == WM_XBUTTONDOWN && !crouchHeld) { crouchHeld = TRUE; SetEvent(evtCrouchStart); }
+                else if (wParam == WM_XBUTTONUP) { crouchHeld = FALSE; }
+                return CallNextHookEx(hMouseHook, nCode, wParam, lParam);
+            }
+            if (vk == vkHasten) {
+                if (wParam == WM_XBUTTONDOWN && !hastenHeld) { hastenHeld = TRUE; SetEvent(evtHastenStart); }
+                else if (wParam == WM_XBUTTONUP) { hastenHeld = FALSE; }
+                return CallNextHookEx(hMouseHook, nCode, wParam, lParam);
+            }
+
+            // è‡ªåŠ¨ç©ºé€Ÿï¼šä¾§é”®é•¿æŒ‰/ç‚¹æŒ‰æ¨¡å¼ï¼ˆä¿®å¤ï¼šç‚¹æŒ‰åˆ‡æ¢åŸºäºæŒ‰ä¸‹å‰çŠ¶æ€ï¼‰
+            if (vk == vkAutoAS) {
+                if (wParam == WM_XBUTTONDOWN) {
+                    if (autoASMouseDownTime == 0) autoASMouseDownTime = GetTickCount();
+                    autoASMousePrevState = autoASHeld;
+                    if (!autoASHeld) {
+                        autoASHeld = TRUE;
+                        autoASLongPressMode = TRUE;
+                        autoASMouseHeld = TRUE;
+                        SetEvent(evtAutoASStart);
+                    } else {
+                        autoASLongPressMode = TRUE;
+                        autoASMouseHeld = TRUE;
+                    }
+                } else if (wParam == WM_XBUTTONUP) {
+                    DWORD held = GetTickCount() - autoASMouseDownTime;
+                    autoASMouseDownTime = 0;
+                    autoASMouseHeld = FALSE;
+                    if (held < AUTOAS_LONGPRESS_MS) {
+                        BOOL newState = !autoASMousePrevState;
+                        autoASHeld = newState;
+                        if (autoASHeld && !autoASMousePrevState) {
+                            SetEvent(evtAutoASStart);
+                        }
+                    } else {
+                        autoASHeld = FALSE;
+                    }
+                    autoASLongPressMode = FALSE;
+                }
+                return CallNextHookEx(hMouseHook, nCode, wParam, lParam);
+            }
+        }
+
         if (wParam == WM_MOUSEWHEEL) {
             SHORT zDelta = (SHORT)HIWORD(p->mouseData);
             if (zDelta < 0) { lastWheelTime = GetTickCount(); wheelGate = TRUE; }
@@ -284,39 +404,39 @@ LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
     return CallNextHookEx(hMouseHook, nCode, wParam, lParam);
 }
 
-// ¶Ô»°¿ò¹ı³Ì
+// å¯¹è¯æ¡†è¿‡ç¨‹
 INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_INITDIALOG: {
         g_hWnd = hDlg;
 
-        // Ö÷Ìâ³õÊ¼»¯
+        // ä¸»é¢˜åˆå§‹åŒ–
         INITCOMMONCONTROLSEX icex; icex.dwSize = sizeof(icex); icex.dwICC = ICC_STANDARD_CLASSES | ICC_WIN95_CLASSES;
         InitCommonControlsEx(&icex);
 
-        // RawInput ×¢²á
+        // RawInput æ³¨å†Œ
         RegisterRawInput(hDlg);
 
-        // ÉèÖÃ´°¿Ú±êÌâ£¨ÖĞÎÄ£©
-        SetWindowTextW(hDlg, L"ÉúËÀ¾Ñ»÷Á¬Ìøºê  By : Reinwi_Ternence");
+        // è®¾ç½®çª—å£æ ‡é¢˜ï¼ˆä¸­æ–‡ï¼‰
+        SetWindowTextW(hDlg, L"ç”Ÿæ­»ç‹™å‡»è¿è·³å®  By : Reinwi_Ternence");
 
-        // ÖĞÎÄ±êÇ©Óë°´Å¥ÎÄ±¾Í³Ò»ÉèÖÃ£¬±ÜÃâ×ÊÔ´±àÂëµ¼ÖÂÂÒÂë
-        SetDlgItemTextW(hDlg, IDC_STATIC_BHOP_LABEL,         L"Á¬ÌøÈÈ¼ü:");
-        SetDlgItemTextW(hDlg, IDC_STATIC_BHOP_DELAY_LABEL,   L"ÑÓ³Ù(ms):");
-        SetDlgItemTextW(hDlg, IDC_STATIC_CROUCH_LABEL,       L"Ë«¶×ÈÈ¼ü:");
-        SetDlgItemTextW(hDlg, IDC_STATIC_CROUCH_DOWN_LABEL,  L"°´ÏÂ(ms):");
-        SetDlgItemTextW(hDlg, IDC_STATIC_CROUCH_UP_LABEL,    L"ËÉ¿ª(ms):");
-        SetDlgItemTextW(hDlg, IDC_STATIC_HASTEN_LABEL,       L"¿ÕËÙ½Å±¾ÈÈ¼ü:");
-        SetDlgItemTextW(hDlg, IDC_STATIC_HASTEN_AMP_LABEL,   L"·ù¶È:");
-        SetDlgItemTextW(hDlg, IDC_STATIC_HASTEN_DELAY_LABEL, L"ÑÓ³Ù(ms):");
-        SetDlgItemTextW(hDlg, IDC_STATIC_AUTOAS_LABEL,       L"×Ô¶¯¿ÕËÙÈÈ¼ü:");
-        SetDlgItemTextW(hDlg, IDC_STATIC_FPS_LABEL,          L"ËøÖ¡:");
-        SetDlgItemTextW(hDlg, IDC_STATIC_STATUS,             L"×´Ì¬: ¾ÍĞ÷");
+        // ä¸­æ–‡æ ‡ç­¾ä¸æŒ‰é’®æ–‡æœ¬ç»Ÿä¸€è®¾ç½®ï¼Œé¿å…èµ„æºç¼–ç å¯¼è‡´ä¹±ç 
+        SetDlgItemTextW(hDlg, IDC_STATIC_BHOP_LABEL,         L"è¿è·³çƒ­é”®:");
+        SetDlgItemTextW(hDlg, IDC_STATIC_BHOP_DELAY_LABEL,   L"å»¶è¿Ÿ(ms):");
+        SetDlgItemTextW(hDlg, IDC_STATIC_CROUCH_LABEL,       L"åŒè¹²çƒ­é”®:");
+        SetDlgItemTextW(hDlg, IDC_STATIC_CROUCH_DOWN_LABEL,  L"æŒ‰ä¸‹(ms):");
+        SetDlgItemTextW(hDlg, IDC_STATIC_CROUCH_UP_LABEL,    L"æ¾å¼€(ms):");
+        SetDlgItemTextW(hDlg, IDC_STATIC_HASTEN_LABEL,       L"ç©ºé€Ÿè„šæœ¬çƒ­é”®:");
+        SetDlgItemTextW(hDlg, IDC_STATIC_HASTEN_AMP_LABEL,   L"å¹…åº¦:");
+        SetDlgItemTextW(hDlg, IDC_STATIC_HASTEN_DELAY_LABEL, L"å»¶è¿Ÿ(ms):");
+        SetDlgItemTextW(hDlg, IDC_STATIC_AUTOAS_LABEL,       L"è‡ªåŠ¨ç©ºé€Ÿçƒ­é”®:");
+        SetDlgItemTextW(hDlg, IDC_STATIC_FPS_LABEL,          L"é”å¸§:");
+        SetDlgItemTextW(hDlg, IDC_STATIC_STATUS,             L"çŠ¶æ€: å°±ç»ª");
 
-        SetDlgItemTextW(hDlg, IDC_BTN_FPS,   L"ËøÖ¡");
-        SetDlgItemTextW(hDlg, IDC_BTN_APPLY, L"Ó¦ÓÃ");
+        SetDlgItemTextW(hDlg, IDC_BTN_FPS,   L"é”å¸§");
+        SetDlgItemTextW(hDlg, IDC_BTN_APPLY, L"åº”ç”¨");
 
-        // ³õÊ¼»¯ÈÈ¼üÏÔÊ¾Óë²ÎÊı
+        // åˆå§‹åŒ–çƒ­é”®æ˜¾ç¤ºä¸å‚æ•°
         RefreshHotkeyEdits();
         wchar_t buf[32];
         wsprintfW(buf, L"%d", bhopDelay);        SetDlgItemTextW(hDlg, IDC_EDIT_BHOP_DELAY, buf);
@@ -325,12 +445,12 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
         wsprintfW(buf, L"%d", hastenAmplitude);  SetDlgItemTextW(hDlg, IDC_EDIT_HASTEN_AMP, buf);
         wsprintfW(buf, L"%d", hastenDelay);      SetDlgItemTextW(hDlg, IDC_EDIT_HASTEN_DELAY, buf);
 
-        // ËøÖ¡Öµ
+        // é”å¸§å€¼
         fpsLast = ReadCurrentFPSFromRegistry();
         wsprintfW(buf, L"%u", fpsLast);
         SetDlgItemTextW(hDlg, IDC_EDIT_FPS, buf);
 
-        // Ó¦ÓÃÍ¼±ê app.ico
+        // åº”ç”¨å›¾æ ‡ app.ico
         HICON hIcon = (HICON)LoadImageW(g_hInst, MAKEINTRESOURCE(IDI_APPICON),
                                         IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR);
         if (hIcon) {
@@ -338,9 +458,9 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
             SendMessageW(hDlg, WM_SETICON, ICON_BIG,   (LPARAM)hIcon);
         }
 
-        // ±ÜÃâ±à¼­¿ò×Ô¶¯»ñµÃ½¹µãµ¼ÖÂ½øÈëÂ¼ÈëÄ£Ê½
+        // é¿å…ç¼–è¾‘æ¡†è‡ªåŠ¨è·å¾—ç„¦ç‚¹å¯¼è‡´è¿›å…¥å½•å…¥æ¨¡å¼
         SetFocus(GetDlgItem(hDlg, IDC_BTN_APPLY));
-        return FALSE; // ÊÖ¶¯ÉèÖÃÁË½¹µã
+        return FALSE; // æ‰‹åŠ¨è®¾ç½®äº†ç„¦ç‚¹
     }
     case WM_INPUT: {
         UINT dwSize = sizeof(RAWINPUT);
@@ -373,10 +493,10 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_COMMAND: {
         if (HIWORD(wParam) == EN_SETFOCUS) {
             switch (LOWORD(wParam)) {
-            case IDC_EDIT_BHOP:   capBhop   = TRUE; UpdateStatus(L"Çë°´ÏÂÒ»¸ö¼ü×÷ÎªÁ¬ÌøÈÈ¼ü"); break;
-            case IDC_EDIT_CROUCH: capCrouch = TRUE; UpdateStatus(L"Çë°´ÏÂÒ»¸ö¼ü×÷ÎªË«¶×ÈÈ¼ü"); break;
-            case IDC_EDIT_HASTEN: capHasten = TRUE; UpdateStatus(L"Çë°´ÏÂÒ»¸ö¼ü×÷Îª¿ÕËÙ½Å±¾ÈÈ¼ü"); break;
-            case IDC_EDIT_AUTOAS: capAutoAS = TRUE; UpdateStatus(L"Çë°´ÏÂÒ»¸ö¼ü×÷Îª×Ô¶¯¿ÕËÙÈÈ¼ü"); break;
+            case IDC_EDIT_BHOP:   capBhop   = TRUE; UpdateStatus(L"è¯·æŒ‰ä¸‹ä¸€ä¸ªé”®ä½œä¸ºè¿è·³çƒ­é”®"); break;
+            case IDC_EDIT_CROUCH: capCrouch = TRUE; UpdateStatus(L"è¯·æŒ‰ä¸‹ä¸€ä¸ªé”®ä½œä¸ºåŒè¹²çƒ­é”®"); break;
+            case IDC_EDIT_HASTEN: capHasten = TRUE; UpdateStatus(L"è¯·æŒ‰ä¸‹ä¸€ä¸ªé”®ä½œä¸ºç©ºé€Ÿè„šæœ¬çƒ­é”®"); break;
+            case IDC_EDIT_AUTOAS: capAutoAS = TRUE; UpdateStatus(L"è¯·æŒ‰ä¸‹ä¸€ä¸ªé”®ä½œä¸ºè‡ªåŠ¨ç©ºé€Ÿçƒ­é”®"); break;
             }
         }
         switch (LOWORD(wParam)) {
@@ -388,7 +508,7 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
             GetDlgItemTextW(hDlg, IDC_EDIT_HASTEN_AMP, buf, 32);   hastenAmplitude = _wtoi(buf);
             GetDlgItemTextW(hDlg, IDC_EDIT_HASTEN_DELAY, buf, 32); hastenDelay     = _wtoi(buf);
             SaveConfig();
-            UpdateStatus(L"²ÎÊıÓëÈÈ¼üÒÑ¸üĞÂ²¢±£´æ");
+            UpdateStatus(L"å‚æ•°ä¸çƒ­é”®å·²æ›´æ–°å¹¶ä¿å­˜");
             return TRUE;
         }
         case IDC_BTN_FPS: {
@@ -398,15 +518,15 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
             fpsLast = fps;
 
             HKEY hKey;
-            LONG res = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Wooduan\\ÉúËÀ¾Ñ»÷Î¢¶ËÕ½¶·",
+            LONG res = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Wooduan\\ç”Ÿæ­»ç‹™å‡»å¾®ç«¯æˆ˜æ–—",
                                        0, NULL, 0, KEY_SET_VALUE, NULL, &hKey, NULL);
             if (res == ERROR_SUCCESS) {
                 RegSetValueExW(hKey, L"FrameLimit_h731164557", 0, REG_DWORD,
                                (const BYTE*)&fps, sizeof(DWORD));
                 RegCloseKey(hKey);
-                UpdateStatus(L"ËøÖ¡³É¹¦");
+                UpdateStatus(L"é”å¸§æˆåŠŸ");
             } else {
-                UpdateStatus(L"ËøÖ¡Ê§°Ü");
+                UpdateStatus(L"é”å¸§å¤±è´¥");
             }
             return TRUE;
         }
@@ -420,7 +540,7 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
     return FALSE;
 }
 
-// ³ÌĞòÈë¿Ú
+// ç¨‹åºå…¥å£
 int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
     g_hInst = hInstance;
 
