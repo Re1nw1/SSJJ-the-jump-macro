@@ -63,19 +63,22 @@ BOOL  wheelGate     = FALSE;
 const DWORD WHEEL_GATE_WINDOW_MS = 200;
 const DWORD STOP_THRESHOLD_MS     = 10;
 
+// 新增：忽略滚轮检测选项（默认不忽略）
+volatile BOOL autoASIgnoreWheel = FALSE;
+
 // 配置文件路径
 wchar_t g_configPath[MAX_PATH] = L"";
 
-// --------------- 新增：自动空速长按/点按逻辑所需变量 ---------------
+// 自动空速按压/切换逻辑
 volatile DWORD autoASKeyDownTime = 0;
-const DWORD AUTOAS_LONGPRESS_MS = 300; // 超过该时长算长按
+const DWORD AUTOAS_LONGPRESS_MS = 300; // 长按阈值
 volatile BOOL autoASLongPressMode = FALSE;
-volatile BOOL autoASPrevState = FALSE; // 记录按下前的状态，用于点按切换
+volatile BOOL autoASPrevState = FALSE; // 记录按下前状态用于短按切换
 
-// --------------- 新增：统一处理鼠标侧键作为热键触发所需 ---------------
+// 鼠标侧键统一作为热键
 volatile BOOL autoASMouseHeld = FALSE;
 volatile DWORD autoASMouseDownTime = 0;
-volatile BOOL autoASMousePrevState = FALSE; // 鼠标侧键按下前的状态
+volatile BOOL autoASMousePrevState = FALSE; // 记录鼠标侧键按下前状态
 
 // 前置声明
 INT_PTR CALLBACK DlgProc(HWND, UINT, WPARAM, LPARAM);
@@ -129,7 +132,7 @@ void PressReleaseKey(WORD vk, int delay) {
 
 // 键名
 void VkName(UINT vk, wchar_t* buf, size_t cch) {
-    // 新增：处理鼠标侧键命名
+    // 鼠标侧键友好名称
     if (vk == VK_XBUTTON1) { wcsncpy_s(buf, cch, L"鼠标侧键1", _TRUNCATE); return; }
     if (vk == VK_XBUTTON2) { wcsncpy_s(buf, cch, L"鼠标侧键2", _TRUNCATE); return; }
 
@@ -182,6 +185,10 @@ void SaveConfig() {
     wsprintfW(buf, L"%d", crouchUp);        WritePrivateProfileStringW(L"Params", L"CrouchUp",        buf, g_configPath);
     wsprintfW(buf, L"%d", hastenAmplitude); WritePrivateProfileStringW(L"Params", L"HastenAmplitude", buf, g_configPath);
     wsprintfW(buf, L"%d", hastenDelay);     WritePrivateProfileStringW(L"Params", L"HastenDelay",     buf, g_configPath);
+
+    // 新增：忽略滚轮检测
+    wsprintfW(buf, L"%d", autoASIgnoreWheel ? 1 : 0);
+    WritePrivateProfileStringW(L"Params", L"AutoASIgnoreWheel", buf, g_configPath);
 }
 void LoadConfig() {
     vkBhop   = GetPrivateProfileIntW(L"Hotkeys", L"Bhop",   VK_F6, g_configPath);
@@ -194,13 +201,16 @@ void LoadConfig() {
     crouchUp        = GetPrivateProfileIntW(L"Params", L"CrouchUp",        4,   g_configPath);
     hastenAmplitude = GetPrivateProfileIntW(L"Params", L"HastenAmplitude", 150, g_configPath);
     hastenDelay     = GetPrivateProfileIntW(L"Params", L"HastenDelay",     4,   g_configPath);
+
+    // 新增：忽略滚轮检测
+    autoASIgnoreWheel = GetPrivateProfileIntW(L"Params", L"AutoASIgnoreWheel", 0, g_configPath) ? TRUE : FALSE;
 }
 
-// 注册表 FPS
+// 注：此处你之前的字符串是乱码，我用中文名示例；你可以按需改回你原来的注册表路径
 DWORD ReadCurrentFPSFromRegistry() {
     HKEY hKey;
     DWORD fps = 120, type = REG_DWORD, size = sizeof(DWORD);
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Wooduan\\生死狙击微端战斗", 0, KEY_QUERY_VALUE, &hKey) == ERROR_SUCCESS) {
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Wooduan\\生死狙击微操战术", 0, KEY_QUERY_VALUE, &hKey) == ERROR_SUCCESS) {
         RegQueryValueExW(hKey, L"FrameLimit_h731164557", NULL, &type, (LPBYTE)&fps, &size);
         RegCloseKey(hKey);
     }
@@ -214,7 +224,7 @@ DWORD WINAPI ThreadBhop(LPVOID) {
         if (WaitForSingleObject(evtBhopStart, INFINITE) == WAIT_OBJECT_0) {
             UpdateStatus(L"连跳运行中...");
             while (bhopActive && running) { SendWheelDown(); Sleep(bhopDelay); }
-            UpdateStatus(L"连跳已停止");
+            UpdateStatus(L"连跳停止");
         }
     }
     timeEndPeriod(1);
@@ -226,7 +236,7 @@ DWORD WINAPI ThreadCrouch(LPVOID) {
         if (WaitForSingleObject(evtCrouchStart, INFINITE) == WAIT_OBJECT_0) {
             UpdateStatus(L"双蹲运行中...");
             while (crouchHeld && running) { SendShift(TRUE); Sleep(crouchDown); SendShift(FALSE); Sleep(crouchUp); }
-            UpdateStatus(L"双蹲已停止");
+            UpdateStatus(L"双蹲停止");
         }
     }
     timeEndPeriod(1);
@@ -243,7 +253,7 @@ DWORD WINAPI ThreadHasten(LPVOID) {
                 MoveMouseRelative(-hastenAmplitude, 0);
                 PressReleaseKey('D', hastenDelay);
             }
-            UpdateStatus(L"空速脚本已停止");
+            UpdateStatus(L"空速脚本停止");
         }
     }
     timeEndPeriod(1);
@@ -256,32 +266,41 @@ DWORD WINAPI ThreadAutoAS(LPVOID) {
             UpdateStatus(L"自动空速运行中...");
             while (autoASHeld && running) {
                 DWORD now = GetTickCount();
-                wheelGate = (now - lastWheelTime <= WHEEL_GATE_WINDOW_MS);
-                if (!wheelGate || (now - lastMoveTime > STOP_THRESHOLD_MS)) {
-                    if (keyDownA) { PressKey('A', FALSE); keyDownA = FALSE; }
-                    if (keyDownD) { PressKey('D', FALSE); keyDownD = FALSE; }
+
+                // 忽略滚轮检测时：仅依据移动停止来松开按键
+                if (autoASIgnoreWheel) {
+                    if (now - lastMoveTime > STOP_THRESHOLD_MS) {
+                        if (keyDownA) { PressKey('A', FALSE); keyDownA = FALSE; }
+                        if (keyDownD) { PressKey('D', FALSE); keyDownD = FALSE; }
+                    }
+                } else {
+                    wheelGate = (now - lastWheelTime <= WHEEL_GATE_WINDOW_MS);
+                    if (!wheelGate || (now - lastMoveTime > STOP_THRESHOLD_MS)) {
+                        if (keyDownA) { PressKey('A', FALSE); keyDownA = FALSE; }
+                        if (keyDownD) { PressKey('D', FALSE); keyDownD = FALSE; }
+                    }
                 }
                 Sleep(5);
             }
             if (keyDownA) { PressKey('A', FALSE); keyDownA = FALSE; }
             if (keyDownD) { PressKey('D', FALSE); keyDownD = FALSE; }
-            UpdateStatus(L"自动空速已停止");
+            UpdateStatus(L"自动空速停止");
         }
     }
     timeEndPeriod(1);
     return 0;
 }
 
-// 钩子
+// 键盘钩子
 LRESULT CALLBACK LowLevelKbdProc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode == HC_ACTION) {
         KBDLLHOOKSTRUCT* p = (KBDLLHOOKSTRUCT*)lParam;
         UINT vk = p->vkCode;
         if (wParam == WM_KEYDOWN) {
-            if (capBhop)   { vkBhop   = vk; capBhop   = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"连跳热键已设置"); return 1; }
-            if (capCrouch) { vkCrouch = vk; capCrouch = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"双蹲热键已设置"); return 1; }
-            if (capHasten) { vkHasten = vk; capHasten = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"空速脚本热键已设置"); return 1; }
-            if (capAutoAS) { vkAutoAS = vk; capAutoAS = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"自动空速热键已设置"); return 1; }
+            if (capBhop)   { vkBhop   = vk; capBhop   = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"已设置连跳热键"); return 1; }
+            if (capCrouch) { vkCrouch = vk; capCrouch = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"已设置双蹲热键"); return 1; }
+            if (capHasten) { vkHasten = vk; capHasten = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"已设置空速脚本热键"); return 1; }
+            if (capAutoAS) { vkAutoAS = vk; capAutoAS = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"已设置自动空速热键"); return 1; }
         }
         if (vk == vkBhop && wParam == WM_KEYDOWN) { bhopActive = !bhopActive; if (bhopActive) SetEvent(evtBhopStart); }
 
@@ -294,34 +313,28 @@ LRESULT CALLBACK LowLevelKbdProc(int nCode, WPARAM wParam, LPARAM lParam) {
             else if (wParam == WM_KEYUP) { hastenHeld = FALSE; }
         }
 
-        // --------------- 自动空速支持点按切换 + 长按持续（修复：点按切换基于按下前状态） ---------------
+        // 自动空速：短按切换、长按维持
         if (vk == vkAutoAS) {
             if (wParam == WM_KEYDOWN) {
                 if (autoASKeyDownTime == 0) autoASKeyDownTime = GetTickCount();
-                autoASPrevState = autoASHeld; // 记录按下前的状态
-                // 为了长按期间立即生效，这里临时启动（不影响点按切换，因为点按时用 prevState 计算）
+                autoASPrevState = autoASHeld;
                 if (!autoASHeld) {
                     autoASHeld = TRUE;
-                    autoASLongPressMode = TRUE; // 先视为长按模式（按住期间保持）
+                    autoASLongPressMode = TRUE;
                     SetEvent(evtAutoASStart);
                 } else {
-                    // 已经是开启状态，保持
                     autoASLongPressMode = TRUE;
                 }
             } else if (wParam == WM_KEYUP) {
                 DWORD held = GetTickCount() - autoASKeyDownTime;
                 autoASKeyDownTime = 0;
                 if (held < AUTOAS_LONGPRESS_MS) {
-                    // 点按：切换到“按下前状态”的相反值
                     BOOL newState = !autoASPrevState;
-                    // 如果当前临时为 TRUE 而 newState 为 FALSE，会直接关闭；反之则保持开启并确保线程启动
                     autoASHeld = newState;
                     if (autoASHeld && !autoASPrevState) {
-                        // OFF -> ON 的点按，确保启动线程
                         SetEvent(evtAutoASStart);
                     }
                 } else {
-                    // 长按：松开即停止
                     autoASHeld = FALSE;
                 }
                 autoASLongPressMode = FALSE;
@@ -330,24 +343,26 @@ LRESULT CALLBACK LowLevelKbdProc(int nCode, WPARAM wParam, LPARAM lParam) {
     }
     return CallNextHookEx(hKbdHook, nCode, wParam, lParam);
 }
+
+// 鼠标钩子
 LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode == HC_ACTION) {
         MSLLHOOKSTRUCT* p = (MSLLHOOKSTRUCT*)lParam;
 
-        // --------------- 鼠标侧键作为热键的录入与触发（与键盘一致逻辑） ---------------
+        // 鼠标侧键作为热键
         if (wParam == WM_XBUTTONDOWN || wParam == WM_XBUTTONUP) {
             UINT btn = HIWORD(p->mouseData); // XBUTTON1=1, XBUTTON2=2
             UINT vk = (btn == XBUTTON1) ? VK_XBUTTON1 : VK_XBUTTON2;
 
-            // 捕获模式：允许侧键被设置为热键
+            // 捕获模式：用侧键设置热键
             if (wParam == WM_XBUTTONDOWN) {
-                if (capBhop)   { vkBhop   = vk; capBhop   = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"连跳热键已设置"); return 1; }
-                if (capCrouch) { vkCrouch = vk; capCrouch = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"双蹲热键已设置"); return 1; }
-                if (capHasten) { vkHasten = vk; capHasten = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"空速脚本热键已设置"); return 1; }
-                if (capAutoAS) { vkAutoAS = vk; capAutoAS = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"自动空速热键已设置"); return 1; }
+                if (capBhop)   { vkBhop   = vk; capBhop   = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"已设置连跳热键"); return 1; }
+                if (capCrouch) { vkCrouch = vk; capCrouch = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"已设置双蹲热键"); return 1; }
+                if (capHasten) { vkHasten = vk; capHasten = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"已设置空速脚本热键"); return 1; }
+                if (capAutoAS) { vkAutoAS = vk; capAutoAS = FALSE; RefreshHotkeyEdits(); UpdateStatus(L"已设置自动空速热键"); return 1; }
             }
 
-            // 触发逻辑：当侧键被设置为某热键时，执行与键盘一致的行为
+            // 将侧键作为功能触发键
             if (vk == vkBhop && wParam == WM_XBUTTONDOWN) {
                 bhopActive = !bhopActive; if (bhopActive) SetEvent(evtBhopStart);
                 return CallNextHookEx(hMouseHook, nCode, wParam, lParam);
@@ -363,7 +378,7 @@ LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 return CallNextHookEx(hMouseHook, nCode, wParam, lParam);
             }
 
-            // 自动空速：侧键长按/点按模式（修复：点按切换基于按下前状态）
+            // 自动空速：侧键支持短按切换、长按维持
             if (vk == vkAutoAS) {
                 if (wParam == WM_XBUTTONDOWN) {
                     if (autoASMouseDownTime == 0) autoASMouseDownTime = GetTickCount();
@@ -410,17 +425,17 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_INITDIALOG: {
         g_hWnd = hDlg;
 
-        // 主题初始化
+        // 公共控件初始化
         INITCOMMONCONTROLSEX icex; icex.dwSize = sizeof(icex); icex.dwICC = ICC_STANDARD_CLASSES | ICC_WIN95_CLASSES;
         InitCommonControlsEx(&icex);
 
         // RawInput 注册
         RegisterRawInput(hDlg);
 
-        // 设置窗口标题（中文）
+        // 标题
         SetWindowTextW(hDlg, L"生死狙击连跳宏  By : Reinwi_Ternence");
 
-        // 中文标签与按钮文本统一设置，避免资源编码导致乱码
+        // 标签与按钮文本
         SetDlgItemTextW(hDlg, IDC_STATIC_BHOP_LABEL,         L"连跳热键:");
         SetDlgItemTextW(hDlg, IDC_STATIC_BHOP_DELAY_LABEL,   L"延迟(ms):");
         SetDlgItemTextW(hDlg, IDC_STATIC_CROUCH_LABEL,       L"双蹲热键:");
@@ -436,6 +451,10 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
         SetDlgItemTextW(hDlg, IDC_BTN_FPS,   L"锁帧");
         SetDlgItemTextW(hDlg, IDC_BTN_APPLY, L"应用");
 
+        // 复选框文本与状态
+        SetDlgItemTextW(hDlg, IDC_CHK_AUTOAS_IGNOREWHEEL, L"忽略滚轮检测");
+        CheckDlgButton(hDlg, IDC_CHK_AUTOAS_IGNOREWHEEL, autoASIgnoreWheel ? BST_CHECKED : BST_UNCHECKED);
+
         // 初始化热键显示与参数
         RefreshHotkeyEdits();
         wchar_t buf[32];
@@ -450,7 +469,7 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
         wsprintfW(buf, L"%u", fpsLast);
         SetDlgItemTextW(hDlg, IDC_EDIT_FPS, buf);
 
-        // 应用图标 app.ico
+        // 应用图标
         HICON hIcon = (HICON)LoadImageW(g_hInst, MAKEINTRESOURCE(IDI_APPICON),
                                         IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR);
         if (hIcon) {
@@ -458,9 +477,9 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
             SendMessageW(hDlg, WM_SETICON, ICON_BIG,   (LPARAM)hIcon);
         }
 
-        // 避免编辑框自动获得焦点导致进入录入模式
+        // 默认焦点：应用按钮
         SetFocus(GetDlgItem(hDlg, IDC_BTN_APPLY));
-        return FALSE; // 手动设置了焦点
+        return FALSE;
     }
     case WM_INPUT: {
         UINT dwSize = sizeof(RAWINPUT);
@@ -476,7 +495,8 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
                 }
                 if (autoASHeld) {
                     lastMoveTime = now;
-                    if (wheelGate && (now - lastWheelTime <= WHEEL_GATE_WINDOW_MS)) {
+                    // 勾选忽略滚轮时，直接按水平移动触发；否则按滚轮门控
+                    if (autoASIgnoreWheel || (wheelGate && (now - lastWheelTime <= WHEEL_GATE_WINDOW_MS))) {
                         if (dx < 0) {
                             if (!keyDownA) { PressKey('A', TRUE); keyDownA = TRUE; }
                             if (keyDownD) { PressKey('D', FALSE); keyDownD = FALSE; }
@@ -493,10 +513,10 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_COMMAND: {
         if (HIWORD(wParam) == EN_SETFOCUS) {
             switch (LOWORD(wParam)) {
-            case IDC_EDIT_BHOP:   capBhop   = TRUE; UpdateStatus(L"请按下一个键作为连跳热键"); break;
-            case IDC_EDIT_CROUCH: capCrouch = TRUE; UpdateStatus(L"请按下一个键作为双蹲热键"); break;
-            case IDC_EDIT_HASTEN: capHasten = TRUE; UpdateStatus(L"请按下一个键作为空速脚本热键"); break;
-            case IDC_EDIT_AUTOAS: capAutoAS = TRUE; UpdateStatus(L"请按下一个键作为自动空速热键"); break;
+            case IDC_EDIT_BHOP:   capBhop   = TRUE; UpdateStatus(L"请按下一个按键作为连跳热键"); break;
+            case IDC_EDIT_CROUCH: capCrouch = TRUE; UpdateStatus(L"请按下一个按键作为双蹲热键"); break;
+            case IDC_EDIT_HASTEN: capHasten = TRUE; UpdateStatus(L"请按下一个按键作为空速脚本热键"); break;
+            case IDC_EDIT_AUTOAS: capAutoAS = TRUE; UpdateStatus(L"请按下一个按键作为自动空速热键"); break;
             }
         }
         switch (LOWORD(wParam)) {
@@ -507,6 +527,10 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
             GetDlgItemTextW(hDlg, IDC_EDIT_CROUCH_UP, buf, 32);    crouchUp        = _wtoi(buf);
             GetDlgItemTextW(hDlg, IDC_EDIT_HASTEN_AMP, buf, 32);   hastenAmplitude = _wtoi(buf);
             GetDlgItemTextW(hDlg, IDC_EDIT_HASTEN_DELAY, buf, 32); hastenDelay     = _wtoi(buf);
+
+            // 读取复选框状态
+            autoASIgnoreWheel = (IsDlgButtonChecked(hDlg, IDC_CHK_AUTOAS_IGNOREWHEEL) == BST_CHECKED);
+
             SaveConfig();
             UpdateStatus(L"参数与热键已更新并保存");
             return TRUE;
@@ -518,7 +542,7 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
             fpsLast = fps;
 
             HKEY hKey;
-            LONG res = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Wooduan\\生死狙击微端战斗",
+            LONG res = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Wooduan\\生死狙击微操战术",
                                        0, NULL, 0, KEY_SET_VALUE, NULL, &hKey, NULL);
             if (res == ERROR_SUCCESS) {
                 RegSetValueExW(hKey, L"FrameLimit_h731164557", 0, REG_DWORD,
