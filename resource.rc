@@ -1,7 +1,6 @@
 #include "resource.h"
 #include <windows.h>
 
-// 应用图标（确保同目录有 app.ico；如果没有请先放置）
 IDI_APPICON ICON "app.ico"
 
 // 启用 comctl v6 主题（现代 Windows 外观）
@@ -49,11 +48,13 @@ BEGIN
     // 自动空速
     LTEXT       "", IDC_STATIC_AUTOAS_LABEL,      8,   71, 80, 10
     EDITTEXT    IDC_EDIT_AUTOAS,                  72,  68, 88, 14, ES_READONLY | WS_TABSTOP
+    // 新增复选框：忽略滚轮检测
+    CONTROL     "", IDC_CHK_AUTOAS_IGNOREWHEEL, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 168, 70, 60, 12
 
     // 锁帧
-    LTEXT       "", IDC_STATIC_FPS_LABEL,         168, 71, 30, 10
-    EDITTEXT    IDC_EDIT_FPS,                     200, 68, 30, 14, ES_NUMBER | WS_TABSTOP
-    PUSHBUTTON  "", IDC_BTN_FPS,                  240, 68, 40, 14, WS_TABSTOP
+    LTEXT       "", IDC_STATIC_FPS_LABEL,         250, 11, 30, 10
+    EDITTEXT    IDC_EDIT_FPS,                     272, 8, 30, 14, ES_NUMBER | WS_TABSTOP
+    PUSHBUTTON  "", IDC_BTN_FPS,                  312, 8, 40, 14, WS_TABSTOP
 
     // 应用按钮（默认按钮）
     DEFPUSHBUTTON  "", IDC_BTN_APPLY,             295, 68, 50, 14, WS_TABSTOP
